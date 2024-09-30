@@ -1,0 +1,496 @@
+import pygame
+import random
+import time
+
+# إعدادات اللعبة
+pygame.init()
+pygame.mixer.init()  # تهيئة مكتبة الصوت
+
+# حجم النافذة
+screen_width, screen_height = 1500, 720
+screen = pygame.display.set_mode((screen_width, screen_height))
+pygame.display.set_caption('Zombie zone')
+
+# ألوان
+black = (0, 0, 0)
+white = (255, 255, 255)
+red = (255, 0, 0)
+orange_gold = (255, 165, 0)  # اللون البرتقالي المائل إلى الذهبي للطلقات
+
+# إعداد الخط
+font = pygame.font.Font(None, 48)
+
+# نص القصة
+story_text = (
+    "In the year 20XX, humans conducted some experiments on human corpses in order to create a super soldier who "
+    "does not die, but some problems occurred and these experiments got out of control and they were imprisoned in "
+    "areas called zombie zones. And because your mission is to eliminate the zombies imprisoned in these zones, "
+    "be careful, in some zones there are some super experiments."
+)
+
+# دالة لتقسيم النص إلى أسطر تناسب العرض
+def split_text(text, font, max_width):
+    words = text.split()
+    lines = []
+    current_line = ""
+
+    for word in words:
+        test_line = current_line + word + " "
+        if font.size(test_line)[0] < max_width:
+            current_line = test_line
+        else:
+            lines.append(current_line)
+            current_line = word + " "
+
+    if current_line:
+        lines.append(current_line)
+    
+    return lines
+
+# عرض شاشة البداية
+def show_start_screen():
+    screen.fill(black)
+    
+    # تقسيم النص بحيث لا يتجاوز عرض الشاشة
+    max_width = screen_width - 100  # ترك مساحة جانبية
+    lines = split_text(story_text, font, max_width)
+
+    # حساب المسافة العلوية بحيث يكون النص مركزيًا على الشاشة
+    total_text_height = len(lines) * font.get_linesize()
+    start_y = (screen_height - total_text_height) // 2
+
+    for i, line in enumerate(lines):
+        text_surface = font.render(line, True, white)
+        screen.blit(text_surface, (50, start_y + i * font.get_linesize()))  # ترك مسافة جانبية للنص
+
+    # عرض صورة البداية
+    start_image = pygame.image.load('/storage/emulated/0/eg/play.png')
+    start_image = pygame.transform.scale(start_image, (400, 300))
+    screen.blit(start_image, (screen_width // 2 - 200, screen_height // 4 - 150))
+
+    # عرض الزر الدائري في أعلى يمين الشاشة
+    info_button_center = (screen_width - 50, 50)
+    pygame.draw.circle(screen, red, info_button_center, 25)
+    text = font.render("i", True, white)
+    text_rect = text.get_rect(center=info_button_center)
+    screen.blit(text, text_rect)
+
+    pygame.display.flip()
+
+    # الانتظار حتى يلمس اللاعب الزر لعرض صورة المعلومات
+    waiting = True
+    while waiting:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                quit()
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if (event.pos[0] - info_button_center[0]) ** 2 + (event.pos[1] - info_button_center[1]) ** 2 <= 25 ** 2:
+                    show_info_screen()
+                else:
+                    waiting = False
+
+# تحميل الصور
+background_image = pygame.image.load('/storage/emulated/0/eg/background.jpg')
+background_image = pygame.transform.scale(background_image, (screen_width, screen_height))
+
+player_image = pygame.image.load('/storage/emulated/0/eg/player.png')
+player_image = pygame.transform.scale(player_image, (200, 200))
+
+enemy_image = pygame.image.load('/storage/emulated/0/eg/enemy.png')
+enemy_image = pygame.transform.scale(enemy_image, (200, 200))
+
+ammo_image = pygame.image.load('/storage/emulated/0/eg/ammo.png')
+ammo_image = pygame.transform.scale(ammo_image, (90, 90))
+
+boss_image = pygame.image.load('/storage/emulated/0/eg/Boss.png')
+boss_image = pygame.transform.scale(boss_image, (500, 500))
+
+info_image = pygame.image.load('/storage/emulated/0/eg/Info.png')
+info_image = pygame.transform.scale(info_image, (800, 600))  # حجم الصورة المعروضة
+
+# إعداد اللاعب
+player_size = 140
+player = pygame.Rect(40, screen_height // 2 + 10, player_size, player_size)
+player_speed = 6
+player_lives = 5
+
+# إعداد الأعداء
+enemy_size = 70
+enemies = []
+enemy_speed = 2
+
+# إعداد الـBoss
+boss_size = 400
+boss_speed = 4
+boss = None
+
+# إعداد الطلقات
+bullet_size = 10
+bullets = []
+bullet_speed = 10
+ammo = 10
+max_ammo = 10
+
+# إعداد الذخيرة
+ammo_boxes = []
+ammo_box_size = 30
+last_ammo_box_time = time.time()
+
+# إعداد المحاولات
+score = 0
+attempts = 3
+
+# إعداد الخط
+line_y = screen_height // 2
+
+# حدود الشاشة (حواف اللعبة)
+border_thickness = 5
+border_rect = pygame.Rect(border_thickness, border_thickness, screen_width - 2 * border_thickness, screen_height - 2 * border_thickness)
+
+# إعداد زر إطلاق النار الدائري
+shoot_button_radius = 70
+shoot_button_color = (255, 0, 0)
+shoot_button_center = (screen_width - shoot_button_radius - 20, screen_height - shoot_button_radius - 20)
+
+# إعداد أزرار التحكم بالاتجاهات
+arrow_size = 60
+arrow_color = (245, 245, 220, 128)  # لون الأسهم (بيج شفاف)
+
+left_arrow = pygame.Rect(60, screen_height - 120, arrow_size, arrow_size)  # زر اليسار
+up_arrow = pygame.Rect(130, screen_height - 180, arrow_size, arrow_size)   # زر الأعلى
+right_arrow = pygame.Rect(200, screen_height - 120, arrow_size, arrow_size)  # زر اليمين
+down_arrow = pygame.Rect(130, screen_height - 60, arrow_size, arrow_size)  # زر الأسفل
+
+# تحميل الأصوات
+pygame.mixer.init()  # تهيئة مكتبة الصوت
+pygame.mixer.music.load('/storage/emulated/0/eg/song/pixel song.mp3')
+pygame.mixer.music.set_volume(0.5)  # ضبط مستوى الصوت للموسيقى الخلفية
+pygame.mixer.music.play(-1)  # تشغيل الموسيقى في تكرار لا نهائي
+
+# تحميل أصوات قصيرة باستخدام Sound
+bullet_sound = pygame.mixer.Sound('/storage/emulated/0/eg/song/gun.mp3')
+zombie_sound = pygame.mixer.Sound('/storage/emulated/0/eg/song/zombie.mp3')
+click_sound = pygame.mixer.Sound('/storage/emulated/0/eg/song/click.mp3')  # تحميل صوت الذخيرة
+game_over_sound = pygame.mixer.Sound('/storage/emulated/0/eg/song/game over.mp3')  # تحميل صوت نهاية اللعبة
+horror_sound = pygame.mixer.Sound('/storage/emulated/0/eg/song/horror2.mp3')  # تحميل صوت الرعب
+
+# دالة لتشغيل الأغاني باستخدام pygame.mixer.music
+def play_music(file, volume=0.5):
+    pygame.mixer.music.load(file)
+    pygame.mixer.music.set_volume(volume)  # ضبط مستوى الصوت
+    pygame.mixer.music.play(-1)  # تشغيل الموسيقى في تكرار لا نهائي
+
+# دالة لإنشاء عدو جديد يتبع اللاعب
+def create_enemy():
+    y = random.randint(line_y + 10, screen_height - enemy_size - border_thickness)
+    enemy = pygame.Rect(screen_width, y, enemy_size, enemy_size)
+    enemies.append(enemy)
+
+# دالة لإنشاء ذخيرة جديدة
+def create_ammo_box():
+    if len(ammo_boxes) < 10:
+        x = random.randint(border_thickness, screen_width - ammo_box_size - border_thickness)
+        y = random.randint(line_y + 10, screen_height - ammo_box_size - border_thickness)
+        ammo_box = pygame.Rect(x, y, ammo_box_size, ammo_box_size)
+        ammo_boxes.append(ammo_box)
+
+# دالة للتصوير
+def shoot():
+    global ammo
+    if ammo > 0:
+        bullet = pygame.Rect(player.x + player_size, player.y + player_size // 2, bullet_size, bullet_size)
+        bullets.append(bullet)
+        ammo -= 1
+        bullet_sound.play()  # تشغيل صوت الطلقات
+
+# دالة لتحريك الطلقات
+def move_bullets():
+    global score
+    for bullet in bullets[:]:
+        bullet.x += bullet_speed
+        if bullet.x > screen_width:
+            bullets.remove(bullet)
+        else:
+            pygame.draw.rect(screen, orange_gold, bullet)  # تغيير لون الطلقات إلى البرتقالي المائل إلى الذهبي
+
+        for enemy in enemies[:]:
+            if bullet.colliderect(enemy):
+                enemies.remove(enemy)
+                bullets.remove(bullet)
+                score += 10
+                zombie_sound.play()  # تشغيل صوت الزومبي
+
+# دالة لتحريك الأعداء لتلحق باللاعب
+def move_enemies():
+    global player_lives, attempts
+    for enemy in enemies[:]:
+        dx = player.x - enemy.x
+        dy = player.y - enemy.y
+        distance = (dx ** 2 + dy ** 2) ** 0.5
+
+        if distance > 0:
+            enemy.x += (dx / distance) * enemy_speed
+            enemy.y += (dy / distance) * enemy_speed
+
+        if enemy.x < border_thickness:
+            enemy.x = border_thickness
+        if enemy.x + enemy_size > screen_width - border_thickness:
+            enemy.x = screen_width - enemy_size - border_thickness
+        if enemy.y < line_y + 10:
+            enemy.y = line_y + 10
+        if enemy.y + enemy_size > screen_height - border_thickness:
+            enemy.y = screen_height - enemy_size - border_thickness
+
+        if enemy.colliderect(player):
+            player_lives -= 1
+            enemies.remove(enemy)
+            if player_lives <= 0:
+                attempts -= 1
+                if attempts > 0:
+                    reset_game()
+                else:
+                    game_over()
+
+# دالة لتحريك الـBoss
+def move_boss():
+    global player_lives, boss  # إضافة boss كمتغير عالمي
+    if boss:
+        if boss.x + boss_size < 0:
+            boss = None
+        else:
+            boss.x -= boss_speed
+            if boss.colliderect(player):
+                boss_kills_player()  # استدعاء الدالة عند قتل اللاعب
+
+# دالة عند قتل الـBoss للاعب
+def boss_kills_player():
+    # إيقاف الموسيقى الخلفية
+    pygame.mixer.music.stop()
+
+    # تشغيل موسيقى الرعب
+    horror_sound.play()
+
+    # عرض شاشة سوداء بعد "Game Over"
+    screen.fill(black)
+    pygame.display.flip()
+
+    # الانتظار لمدة ثانيتين
+    time.sleep(2)
+
+    # عرض النص بعد ثانيتين وتقسيمه ليسهل قراءته
+    font = pygame.font.Font(None, 50)
+    lines = split_text("This is the demo version of the game and there is a sequel to this part and it will reveal many secrets.", font, screen_width - 100)
+    start_y = screen_height // 2 - len(lines) * font.get_linesize() // 2
+    for i, line in enumerate(lines):
+        text_surface = font.render(line, True, white)
+        screen.blit(text_surface, (50, start_y + i * font.get_linesize()))
+
+    pygame.display.flip()
+
+    # الانتظار حتى يتم الضغط على الشاشة
+    waiting = True
+    while waiting:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                quit()
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                pygame.quit()  # إغلاق اللعبة بعد الضغط
+
+# إضافة صوت الصرخة والأغنية عند ظهور الـBoss
+def spawn_boss():
+    global boss
+    boss = pygame.Rect(screen_width, screen_height // 2, boss_size, boss_size)
+    play_music('/storage/emulated/0/eg/song/zombie boss.mp3', 1.0)  # تشغيل صوت الصرخة
+    time.sleep(2)  # الانتظار قليلاً قبل تشغيل الأغنية
+    play_music('/storage/emulated/0/eg/song/risk2.mp3', 0.8)  # تشغيل الأغنية بصوت أعلى
+
+# دالة لفحص الاصطدام مع مكعبات الذخيرة
+def check_ammo_box_collision():
+    global ammo
+    for ammo_box in ammo_boxes[:]:
+        if player.colliderect(ammo_box):
+            ammo = max_ammo
+            ammo_boxes.remove(ammo_box)
+            click_sound.play()  # تشغيل صوت الذخيرة عند جمعها
+
+# دالة لإعادة تعيين اللعبة
+def reset_game():
+    global player_lives, score, ammo, enemies, bullets, ammo_boxes, boss
+    player_lives = 3
+    score = 0
+    ammo = max_ammo
+    enemies = []
+    bullets = []
+    ammo_boxes = []
+    boss = None
+    for _ in range(5):
+        create_enemy()
+
+# دالة لرسم زر "Shoot" دائري
+def draw_shoot_button():
+    pygame.draw.circle(screen, shoot_button_color, shoot_button_center, shoot_button_radius)
+    font = pygame.font.Font(None, 36)
+    text = font.render("Shoot", True, white)
+    text_rect = text.get_rect(center=shoot_button_center)
+    screen.blit(text, text_rect)
+
+# دالة لرسم أزرار الأسهم
+def draw_arrows():
+    pygame.draw.rect(screen, arrow_color, left_arrow)
+    pygame.draw.rect(screen, arrow_color, up_arrow)
+    pygame.draw.rect(screen, arrow_color, right_arrow)
+    pygame.draw.rect(screen, arrow_color, down_arrow)
+
+    font = pygame.font.Font(None, 36)
+    screen.blit(font.render("⬅️", True, white), left_arrow.center)
+    screen.blit(font.render("⬆️", True, white), up_arrow.center)
+    screen.blit(font.render("➡️", True, white), right_arrow.center)
+    screen.blit(font.render("⬇️", True, white), down_arrow.center)
+
+# دالة لإظهار شاشة Game Over وزر لإعادة تعيين اللعبة
+def game_over():
+    screen.fill(black)
+    font = pygame.font.Font(None, 100)
+    text = font.render("GAME OVER", True, red)
+    text_rect = text.get_rect(center=(screen_width // 2, screen_height // 2 - 50))
+    screen.blit(text, text_rect)
+
+    retry_button = pygame.Rect(screen_width // 2 - 100, screen_height // 2 + 50, 200, 50)
+    pygame.draw.rect(screen, white, retry_button)
+    font = pygame.font.Font(None, 50)
+    retry_text = font.render("Retry", True, black)
+    retry_text_rect = retry_text.get_rect(center=retry_button.center)
+    screen.blit(retry_text, retry_text_rect)
+
+    pygame.display.flip()
+
+    # تشغيل صوت النهاية عند انتهاء اللعبة
+    game_over_sound.play()  # تشغيل صوت "game over" عند الخسارة
+
+    waiting = True
+    while waiting:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                quit()
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                if retry_button.collidepoint(event.pos):
+                    reset_game()
+                    waiting = False
+
+# دالة لإظهار معلومات اللعبة
+def show_info_screen():
+    screen.fill(black)
+    screen.blit(info_image, (screen_width // 2 - 400, screen_height // 2 - 300))
+    pygame.display.flip()
+
+    waiting = True
+    while waiting:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                quit()
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                waiting = False
+
+# الدالة الرئيسية لتشغيل اللعبة
+def game_loop():
+    global last_ammo_box_time, boss
+    clock = pygame.time.Clock()
+    running = True
+
+    show_start_screen()
+
+    move_left = move_right = move_up = move_down = False
+
+    while running:
+        screen.blit(background_image, (0, 0))
+        pygame.draw.line(screen, black, (0, line_y), (screen_width, line_y), 2)
+        pygame.draw.rect(screen, white, border_rect, border_thickness)
+        screen.blit(player_image, player.topleft)
+
+        for enemy in enemies:
+            screen.blit(enemy_image, enemy.topleft)
+
+        for bullet in bullets:
+            move_bullets()
+
+        for ammo_box in ammo_boxes:
+            screen.blit(ammo_image, ammo_box.topleft)
+
+        draw_shoot_button()
+        draw_arrows()
+
+        move_enemies()
+        check_ammo_box_collision()
+
+        if score >= 1000 and not boss:
+            spawn_boss()  # استدعاء دالة spawn_boss عند ظهور الـ Boss
+
+        if boss:
+            screen.blit(boss_image, boss.topleft)
+            move_boss()
+
+        font = pygame.font.Font(None, 36)
+        status_text = font.render(f"Score: {score} | Lives: {player_lives} | Ammo: {ammo}/{max_ammo}", True, white)
+        screen.blit(status_text, (10, 10))
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            if event.type == pygame.MOUSEBUTTONDOWN:
+                if (event.pos[0] - shoot_button_center[0]) ** 2 + (event.pos[1] - shoot_button_center[1]) ** 2 <= shoot_button_radius ** 2:
+                    shoot()
+                elif left_arrow.collidepoint(event.pos):
+                    move_left = True
+                elif up_arrow.collidepoint(event.pos):
+                    move_up = True
+                elif right_arrow.collidepoint(event.pos):
+                    move_right = True
+                elif down_arrow.collidepoint(event.pos):
+                    move_down = True
+
+            if event.type == pygame.MOUSEBUTTONUP:
+                if left_arrow.collidepoint(event.pos):
+                    move_left = False
+                elif up_arrow.collidepoint(event.pos):
+                    move_up = False
+                elif right_arrow.collidepoint(event.pos):
+                    move_right = False
+                elif down_arrow.collidepoint(event.pos):
+                    move_down = False
+
+        if move_left:
+            player.x -= player_speed
+        if move_right:
+            player.x += player_speed
+        if move_up:
+            player.y -= player_speed
+        if move_down:
+            player.y += player_speed
+
+        if player.x < border_thickness:
+            player.x = border_thickness
+        if player.x + player_size > screen_width - border_thickness:
+            player.x = screen_width - player_size - border_thickness
+        if player.y < line_y + 10:
+            player.y = line_y + 10
+        if player.y + player_size > screen_height - border_thickness:
+            player.y = screen_height - player_size - border_thickness
+
+        if time.time() - last_ammo_box_time > 10:
+            create_ammo_box()
+            last_ammo_box_time = time.time()
+
+        if random.randint(1, 100) > 98:
+            create_enemy()
+
+        pygame.display.flip()
+        clock.tick(60)
+
+    pygame.quit()
+
+# بدء اللعبة
+game_loop()
